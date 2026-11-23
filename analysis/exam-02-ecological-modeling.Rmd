@@ -1,0 +1,765 @@
+---
+title: ""
+author: ""
+date: ""
+
+output:
+  pdf_document:
+    toc: false
+    number_sections: false
+    latex_engine: xelatex
+
+header-includes:
+  - \usepackage{geometry}
+  - \geometry{margin=2.5cm}
+---
+
+\begin{center}
+
+\vspace{1cm}
+
+{\Huge \textbf{Parcial 2}}
+
+\vspace{0.3cm}
+
+{\Large Biología Cuantitativa}
+
+\vspace{1cm}
+
+\end{center}
+
+\noindent
+\textbf{} Juanita Guerrero
+\hfill
+`r {
+  meses <- c('enero','febrero','marzo','abril','mayo','junio',
+             'julio','agosto','septiembre','octubre','noviembre','diciembre')
+  hoy <- Sys.Date()
+  paste(as.numeric(format(hoy, '%d')),
+        'de',
+        meses[as.numeric(format(hoy, '%m'))],
+        'de',
+        format(hoy, '%Y'))
+}`
+
+\vspace{-1.5em}
+\noindent\rule{\textwidth}{0.4pt}
+\vspace{-0.3em}
+
+\begingroup
+\renewcommand{\contentsname}{}
+\tableofcontents
+\endgroup
+
+\newpage
+
+# Sección 1 - Epidemiología Ecológica y Carga Parasitaria en Arrecifes
+
+\vspace{-2em}
+\noindent\rule{\textwidth}{0.4pt}
+\vspace{-0.3em}
+
+## Ejercicio 1
+
+```{r, warning=FALSE, message=FALSE}
+datos_peces = read.csv("../data/df_epidemiologia_arrecifal.csv")
+
+# Solo una semana para tener una ventana de muestreo único y evitar mediciones 
+# repetidas por pez
+datos_0 = subset(datos_peces, semana == 0)
+
+# Revisar datos
+summary(datos_0$conteo_parasitos)
+mean(datos_0$conteo_parasitos)
+var(datos_0$conteo_parasitos)
+```
+
+`var` > `mean`, podría existir sobredispersión.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+library(ggplot2)
+
+# Densidad de hospederos y carga parasitaria
+ggplot(datos_0, aes(x = densidad_hospederos, y = conteo_parasitos)) +
+  geom_point(alpha = 0.5, color = "steelblue3") +
+  geom_smooth(method = "loess", color = "navy", se = TRUE) +
+  labs(
+    title = "Relación entre densidad de hospederos y carga parasitaria",
+    x = "Densidad de hospederos (peces/m²)",
+    y = "Número de ectoparásitos por pez"
+  ) +
+  theme_bw()
+```
+
+A medida que aumenta la densidad de hospederos, también tiende a aumentar el número de parásitos por pez, aunque hay bastante variación entre las observaciones.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+# Temperatura del agua y carga parasitaria
+ggplot(datos_0, aes(x = temperatura_agua, y = conteo_parasitos)) +
+  geom_point(alpha = 0.5, color = "steelblue3") +
+  geom_smooth(method = "loess", color = "navy", se = TRUE) +
+  labs(
+    title = "Relación entre temperatura del agua y carga parasitaria",
+    x = "Temperatura del agua (°C)",
+    y = "Número de ectoparásitos por pez"
+  ) +
+  theme_bw()
+```
+
+La cantidad de parásitos tiende a aumentar con la temperatura, especialmente a partir de los 25 °C. Sin embargo, la relación no parece completamente lineal y presenta algunas fluctuaciones.
+
+**Hipótesis**
+
+**Densidad de hospederos**
+
+**$H_0$:** La densidad de hospederos no tiene efecto sobre el número esperado de ectoparásitos ($\beta_1 = 0$).
+
+**$H_1$:** La densidad de hospederos tiene un efecto sobre el número esperado de ectoparásitos ($\beta_1 \neq 0$).
+
+**Temperatura del agua**
+
+**$H_0$:** La temperatura del agua no tiene efecto sobre el número esperado de ectoparásitos ($\beta_2 = 0$).
+
+**$H_1$:** La temperatura del agua tiene un efecto sobre el número esperado de ectoparásitos ($\beta_2 \neq 0$).
+
+Nivel de significancia: $\alpha = 0.05$.
+
+**Selección del modelo**
+
+Los gráficos exploratorios muestran una tendencia general creciente del número de parásitos con la densidad de hospederos y la T del agua. Por ello, se decidió evaluar estas relaciones mediante un GLM Poisson con enlace logarítmico, dado que la variable respuesta es un conteo de valores enteros no negativos.
+
+```{r, warning=FALSE, message=FALSE}
+mod_pois = glm(
+  conteo_parasitos ~ densidad_hospederos + temperatura_agua,
+  family = poisson(link = "log"), data = datos_0
+)
+
+summary(mod_pois)
+```
+
+```{r, warning=FALSE, message=FALSE}
+library(DHARMa)
+
+# Supuestos
+simulateResiduals(mod_pois, plot = TRUE)
+```
+
+Los residuos no presentan desviaciones significativas (KS: p = 0.98), ni problemas de dispersión (p = 0.17) o valores atípicos (p = 1). Por tanto, no se detectan problemas importantes en estos diagnósticos del modelo Poisson.
+
+```{r, warning=FALSE, message=FALSE}
+library(car)
+
+vif(mod_pois)
+```
+
+Ambas variables presentan un VIF de 1.004, muy por debajo del límite de 5, por lo que no se observan problemas de multicolinealidad entre la densidad de hospederos y la temperatura del agua.
+
+```{r, warning=FALSE, message=FALSE}
+library(lmtest)
+
+resettest(mod_pois, power = 2:3, type = "fitted")
+```
+
+El test RESET no mostró evidencia significativa de desviaciones de la forma lineal planteada en la escala del enlace log (p = 0.304).
+
+**Predicciones del modelo**
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+library(ggeffects)
+
+# Efecto de la densidad según el modelo
+efecto_dens = ggpredict(mod_pois, terms = "densidad_hospederos [all]")
+
+plot(efecto_dens, colors = "navy") +
+  labs(
+    title = "Carga parasitaria esperada según la densidad de hospederos",
+    x = "Densidad de hospederos (peces/m²)",
+    y = "Número esperado de ectoparásitos por pez"
+  ) +
+  theme_bw()
+```
+
+El modelo predice que el número de parásitos por pez aumenta a medida que crece la densidad de hospederos. La banda de confianza se amplía en las densidades más altas, lo que indica mayor incertidumbre en las estimaciones.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+# Efecto de la temperatura según el modelo
+efecto_temp = ggpredict(mod_pois, terms = "temperatura_agua [all]")
+
+plot(efecto_temp, colors = "navy") +
+  labs(
+    title = "Carga parasitaria esperada según la temperatura del agua",
+    x = "Temperatura del agua (°C)",
+    y = "Número esperado de ectoparásitos por pez"
+  ) +
+  theme_bw()
+```
+
+El número esperado de parásitos aumenta con la temperatura del agua, siguiendo una tendencia creciente que se acentúa a temperaturas más altas. La incertidumbre también aumenta hacia el extremo superior del rango de temperaturas.
+
+```{r}
+# Coef a %
+(exp(coef(mod_pois)) - 1) * 100
+```
+
+La densidad de hospederos y la temperatura del agua presentaron asociaciones positivas y significativas con el número de parásitos (p < 0.001). Por cada pez/m² adicional, el conteo esperado aumenta un 3.27 %, mientras que por cada 1 °C adicional aumenta un 10.49 %, manteniendo constante la otra variable.
+
+El efecto de la temperatura es proporcional, ya que el modelo con enlace logarítmico estima un incremento porcentual constante y no una cantidad fija de parásitos por grado. Además, los diagnósticos no evidenciaron problemas importantes en el ajuste del modelo. Estos resultados sugieren que el calentamiento local podría aumentar la carga parasitaria de los peces y, con ello, el riesgo epidemiológico.
+
+## Ejercicio 2
+
+```{r}
+# Selección última semana de seguimiento sin mezclar tiempo y espacio
+datos_7 = subset(datos_peces, semana == 7)
+
+# Revisar datos
+summary(datos_7$biomasa_parasitos_mg)
+
+table(datos_7$tratamiento_antiparasitario)
+
+table(datos_7$localidad, datos_7$estacion_muestreo)
+```
+
+Se analizaron 108 peces de la semana 7, distribuidos en dos tratamientos y nueve estaciones de tres localidades. La biomasa fue positiva y asimétrica hacia la derecha (media = 24.08 mg; mediana = 10.94 mg).
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+# Distribución de la biomasa entre los dos tratamientos.
+ggplot(datos_7, aes(x = tratamiento_antiparasitario,
+                        y = biomasa_parasitos_mg)) +
+  geom_boxplot(fill = "lightblue", color = "navy") +
+  labs(
+    title = "Biomasa parasitaria según el tratamiento",
+    x = "Tratamiento antiparasitario",
+    y = "Biomasa parasitaria (mg)"
+  ) +
+  scale_y_log10() +
+  theme_bw()
+```
+
+En la semana 7, los peces del grupo Control presentan una biomasa parasitaria mayor y más dispersa que los del grupo Suplementado, que muestran valores más bajos y homogéneos.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+# Diferencias de biomasa entre tratamientos y localidades.
+ggplot(datos_7, aes(x = localidad,
+                        y = biomasa_parasitos_mg,
+                        fill = tratamiento_antiparasitario)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("lightblue", "navy")) +
+  labs(
+    title = "Biomasa parasitaria por localidad y tratamiento",
+    x = "Localidad",
+    y = "Biomasa parasitaria (mg)",
+    fill = "Tratamiento"
+  ) +
+  scale_y_log10() +
+  theme_bw()
+```
+
+En las tres localidades, el grupo Suplementado presenta menor biomasa parasitaria que el Control. Aunque se observan diferencias entre localidades, la reducción asociada al tratamiento parece mantenerse en toda el área de estudio.
+
+**Hipótesis**
+
+**Efecto del tratamiento antiparasitario**
+
+**$H_0$:** El tratamiento Suplementado no genera ningún desplazamiento en el intercepto de la biomasa parasitaria respecto al grupo Control ($\beta_1 = 0$).
+
+**$H_1$:** El tratamiento Suplementado desplaza el intercepto respecto al grupo Control ($\beta_1 \neq 0$).
+
+**Consistencia espacial del tratamiento**
+
+**$H_0$:** El efecto del tratamiento es igual entre localidades ($\beta_{\text{interacción}} = 0$ para ambas localidades comparadas).
+
+**$H_1$:** El efecto del tratamiento difiere en al menos una localidad ($\beta_{\text{interacción}} \neq 0$ para alguna localidad).
+
+
+Nivel de significancia: $\alpha = 0.05$.
+
+**Selección del modelo**
+
+Se propone un GLMM con distribución Gamma y enlace log, ya que la biomasa parasitaria es una variable continua y positiva que presenta una marcada asimetría hacia la derecha. Los gráficos exploratorios muestran diferencias entre tratamientos y localidades, lo que respalda la inclusión del tratamiento como efecto fijo y de la estructura espacial como efectos aleatorios.
+
+```{r, warning=FALSE, message=FALSE}
+library(glmmTMB)
+
+mod_gamma = glmmTMB(
+  biomasa_parasitos_mg ~ tratamiento_antiparasitario +
+    (1 | localidad/estacion_muestreo),
+  family = Gamma(link = "log"), data = datos_7
+)
+
+summary(mod_gamma)
+```
+
+```{r, warning=FALSE, message=FALSE}
+# Supuestos
+simulateResiduals(mod_gamma, plot = TRUE)
+```
+
+El GLMM Gamma presentó problemas de ajuste, principalmente por la dispersión significativa (p < 0.05) y las diferencias en la distribución de los residuos entre grupos. Por esto, se decidió probar un LMM con la biomasa transformada a logaritmo.
+
+```{r, warning=FALSE, message=FALSE, fig.width=12, fig.height=10, out.width="100%"}
+library(lme4)
+library(performance)
+library(see)
+
+# LMM con biomasa transformada
+mod_lmm = lmer(
+  log(biomasa_parasitos_mg) ~ tratamiento_antiparasitario +
+    (1 | localidad/estacion_muestreo), data = datos_7
+)
+
+summary(mod_lmm)
+
+# Supuestos
+print(check_model(mod_lmm))
+```
+
+Los diagnósticos del LMM mostraron un comportamiento generalmente adecuado de los residuos, sin patrones importantes de falta de linealidad ni problemas evidentes de homogeneidad de varianzas, aunque se observaron algunas desviaciones de la normalidad. Por esto, se mantuvo como modelo de referencia para continuar el análisis, teniendo en cuenta que presentó un ajuste singular debido a que la varianza entre estaciones se estimó en cero.
+
+```{r, warning=FALSE, message=FALSE, fig.width=12, fig.height=10, out.width="100%"}
+# El tratamiento cambia entre localidades?
+mod_interaccion = lmer(
+  log(biomasa_parasitos_mg) ~ tratamiento_antiparasitario * localidad +
+    (1 | localidad:estacion_muestreo), data = datos_7
+)
+
+summary(mod_interaccion)
+
+# Supuestos
+print(check_model(mod_interaccion))
+```
+
+Los diagnósticos del modelo con interacción entre tratamiento y localidad mostraron un comportamiento generalmente adecuado de los residuos, sin patrones importantes de falta de linealidad ni observaciones claramente influyentes. Se observaron ligeras variaciones en la dispersión y algunas desviaciones de la normalidad, mientras que la colinealidad fue moderada para el término de interacción. El modelo también presentó un ajuste singular, debido a que la varianza entre estaciones se estimó en cero.
+
+En la semana 7, el tratamiento Suplementado se asoció con una menor biomasa parasitaria respecto al Control, con una reducción estimada del 77.8 % en la media geométrica según el LMM sin interacción. Al incluir la interacción con localidad, no se encontró evidencia clara de que el efecto del tratamiento fuera diferente en Isla Abierta ($t = 0.258$) o Parque Nacional ($t = 1.163$) respecto a Arrecife Urbano, lo que sugiere que la reducción asociada al tratamiento se mantiene relativamente consistente entre localidades. En el LMM inicial, la variabilidad espacial estimada se concentró en las diferencias entre localidades, mientras que la varianza adicional entre estaciones fue cero. Este resultado debe interpretarse con cautela debido al ajuste singular.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+# Predicciones por tratamiento y localidad
+pred = ggpredict(mod_interaccion,
+                 terms = c("tratamiento_antiparasitario", "localidad"))
+
+ggplot(pred, aes(x = x, y = predicted, color = group, group = group)) +
+  geom_point(size = 3, position = position_dodge(width = 0.2)) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                width = 0.1, position = position_dodge(width = 0.2)) +
+  scale_color_manual(values = c("skyblue3", "steelblue4", "navy")) +
+  labs(
+    title = "Biomasa estimada por tratamiento y localidad",
+    x = "Tratamiento",
+    y = "Biomasa parasitaria estimada (mg)",
+    color = "Localidad"
+  ) +
+  theme_bw()
+```
+
+Las predicciones del modelo muestran una menor biomasa parasitaria en el grupo Suplementado en las tres localidades. Aunque se observan diferencias en los valores estimados, las interacciones no mostraron evidencia clara de que el efecto del tratamiento varíe entre localidades.
+
+## Ejercicio 3
+
+```{r}
+# Revisar datos longitudinales
+table(datos_peces$semana)
+table(table(datos_peces$pez_id))
+table(datos_peces$tratamiento_antiparasitario)
+```
+
+Se analizaron 864 observaciones correspondientes a 108 peces, cada uno con ocho mediciones semanales. Los datos incluyen dos tratamientos, Control y Suplementado, y permiten evaluar los cambios en la biomasa parasitaria a lo largo del seguimiento.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+# Evolución de la biomasa por tratamiento
+ggplot(datos_peces,
+       aes(x = semana, y = biomasa_parasitos_mg,
+           color = tratamiento_antiparasitario)) +
+  stat_summary(fun = mean, geom = "line", linewidth = 1) +
+  stat_summary(fun = mean, geom = "point", size = 2) +
+  scale_color_manual(values = c("skyblue3", "navy")) +
+  scale_x_continuous(breaks = 0:7) +
+  labs(
+    title = "Evolución de la biomasa parasitaria por tratamiento",
+    x = "Semana de seguimiento",
+    y = "Biomasa parasitaria promedio (mg)",
+    color = "Tratamiento"
+  ) +
+  theme_bw()
+```
+
+
+La biomasa parasitaria aumenta durante el seguimiento en ambos tratamientos, pero el incremento es mucho mayor en el grupo Control. En los peces Suplementados, la biomasa se mantiene relativamente estable.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+# Biomasa individual por semana y tratamiento
+ggplot(datos_peces,
+       aes(x = semana, y = biomasa_parasitos_mg)) +
+  geom_jitter(color = "steelblue4", alpha = 0.3,
+              width = 0.15, height = 0) +
+  facet_wrap(~ tratamiento_antiparasitario) +
+  scale_x_continuous(breaks = 0:7) +
+  scale_y_log10() +
+  labs(
+    title = "Variación de la biomasa parasitaria durante el seguimiento",
+    x = "Semana de seguimiento",
+    y = "Biomasa parasitaria (mg, escala log10)"
+  ) +
+  theme_bw()
+```
+
+Se observa variabilidad en la biomasa entre peces durante las ocho semanas. En el grupo Control, los valores tienden a aumentar y presentan mayor dispersión hacia el final del seguimiento, mientras que en Suplementado se mantienen más bajos y relativamente estables.
+
+
+**Hipótesis**
+
+**Variabilidad individual en la velocidad de acumulación**
+
+**$H_0$:** La velocidad de acumulación de biomasa parasitaria es homogénea entre los peces ($\sigma^2_{\text{pendiente,pez}} = 0$).
+
+**$H_1$:** Existen diferencias individuales en la velocidad de acumulación de biomasa parasitaria ($\sigma^2_{\text{pendiente,pez}} > 0$).
+
+**Efectividad del tratamiento a lo largo del tiempo**
+
+**$H_0$:** La velocidad de acumulación de biomasa parasitaria no difiere entre los tratamientos durante las ocho semanas de seguimiento ($\beta_{\text{tratamiento:semana}} = 0$).
+
+**$H_1$:** La velocidad de acumulación de biomasa parasitaria difiere entre los tratamientos durante las ocho semanas de seguimiento ($\beta_{\text{tratamiento:semana}} \neq 0$).
+
+**Nivel de significancia:** $\alpha = 0.05$.
+
+Se propone un GLMM con distribución Gamma y función de enlace logarítmica, dado que la biomasa parasitaria es una variable continua y positiva, y los gráficos exploratorios muestran una distribución asimétrica y una dispersión considerable entre peces.
+
+```{r, warning=FALSE, message=FALSE}
+mod_gamma2 = glmmTMB(
+  biomasa_parasitos_mg ~ tratamiento_antiparasitario * semana +
+    (1 + semana | pez_id),
+  family = Gamma(link = "log"), data = datos_peces
+)
+
+summary(mod_gamma2)
+
+# Cambio porcentual semanal en cada tratamiento
+b = fixef(mod_gamma2)$cond
+
+# Control
+(exp(b["semana"]) - 1) * 100
+
+# Suplementado
+(exp(b["semana"] +
+     b["tratamiento_antiparasitarioSuplementado:semana"]) - 1) * 100
+
+# Supuestos
+simulateResiduals(mod_gamma2, plot = TRUE)
+```
+
+El diagnóstico de residuos simulados mediante DHARMa mostró que no se detectaron desviaciones significativas de la distribución esperada (KS, p = 0.144), ni un exceso significativo de valores atípicos (p = 0.699). Sin embargo, la prueba de dispersión identificó sobredispersión significativa (dispersión = 2.05; p = 0.016), lo que indica que el modelo no captura completamente la variabilidad observada.
+
+Como alternativa, se ajustó un modelo lineal mixto (LMM) con transformación logarítmica de la biomasa, manteniendo los mismos efectos fijos y aleatorios. Este produjo coeficientes muy similares, incluida la interacción Tratamiento × Semana (\(\beta \approx -0.14\)), pero también presentó problemas de dispersión (p = 0.04).
+
+Por tanto, se conservó el GLMM Gamma como modelo principal, dada su adecuación a la naturaleza positiva y asimétrica de la variable respuesta.
+
+```{r, warning=FALSE, message=FALSE}
+mod_gamma_intercepto = glmmTMB(
+  biomasa_parasitos_mg ~ tratamiento_antiparasitario * semana +
+    (1 | pez_id),
+  family = Gamma(link = "log"),
+  data = datos_peces
+)
+
+AIC(mod_gamma_intercepto, mod_gamma2)
+```
+
+Para evaluar si la velocidad de acumulación de biomasa parasitaria es homogénea entre individuos, se compararon dos GLMM Gamma: uno con únicamente interceptos aleatorios por pez (`mod_gamma_intercepto`) y otro con interceptos y pendientes aleatorias para la semana (`mod_gamma2`).
+
+El modelo con pendientes aleatorias presentó un menor AIC (4687.36) que el modelo con solo interceptos aleatorios (4755.04), con una diferencia de $\Delta AIC = 67.68$.
+
+Estos resultados favorecen el modelo que permite pendientes individuales y sugieren que la velocidad de acumulación de biomasa parasitaria no es homogénea entre los peces, sino que presenta variabilidad individual.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+# Trayectorias de biomasa parasitaria predichas por el GLMM Gamma para cada tratamiento
+pred_3 = ggpredict(
+  mod_gamma2,
+  terms = c("semana [0:7]", "tratamiento_antiparasitario")
+)
+
+ggplot(pred_3, aes(x = x, y = predicted,
+                   color = group, fill = group)) +
+  geom_line(linewidth = 1.2) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high),
+              alpha = 0.15, color = NA) +
+  scale_color_manual(values = c("skyblue3", "navy")) +
+  scale_fill_manual(values = c("skyblue3", "navy")) +
+  scale_x_continuous(breaks = 0:7) +
+  labs(
+    title = "Acumulación de biomasa parasitaria por tratamiento",
+    x = "Semana de seguimiento",
+    y = "Biomasa parasitaria predicha (mg)",
+    color = "Tratamiento",
+    fill = "Tratamiento"
+  ) +
+  theme_bw()
+```
+
+La interacción entre tratamiento y semana fue negativa y estadísticamente significativa ($\beta = -0.1394$; $p < 0.001$), lo que indica que la velocidad de acumulación de biomasa parasitaria difiere entre los tratamientos.
+
+Según el GLMM Gamma, la biomasa esperada aumenta aproximadamente un 21.8 % semanal en el grupo Control, frente a un 6.0 % en el grupo Suplementado. Esto sugiere que el tratamiento es efectivo para reducir la velocidad de acumulación parasitaria durante las ocho semanas de seguimiento, aunque no detiene completamente su incremento. No obstante, debido a la sobredispersión detectada, estos resultados deben interpretarse con cautela.
+
+# Sección 2 - Ecofisiología Vegetal y Respuestas Funcionales
+
+\vspace{-2em}
+\noindent\rule{\textwidth}{0.4pt}
+\vspace{-0.3em}
+
+## Ejercicio 1
+
+```{r, warning=FALSE, message=FALSE}
+datos_plantas = read.csv("../data/df_ecofisiologia_gradiente.csv")
+
+# Revisar datos
+str(datos_plantas)
+summary(datos_plantas)
+```
+
+Se analizaron 300 observaciones de seis variables ecofisiológicas y ambientales. La biomasa foliar presentó valores estrictamente positivos y una media superior a la mediana, lo que sugiere una distribución asimétrica hacia la derecha. La radiación PAR y el déficit de presión de vapor presentan rangos amplios de variación, que permiten explorar posibles respuestas no lineales de la biomasa a ambos gradientes.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+# Relación entre biomasa foliar y radiación PAR
+ggplot(datos_plantas, aes(x = radiacion_par, y = biomasa_hoja_g)) +
+  geom_point(color = "steelblue4", alpha = 0.4) +
+  geom_smooth(method = "loess", color = "navy", fill = "skyblue",
+              se = TRUE) +
+  labs(
+    x = "Radiación PAR (µmol/m²/s)",
+    y = "Biomasa foliar (g)",
+    title = "Relación entre radiación PAR y biomasa foliar"
+  ) +
+  theme_bw()
+```
+
+La biomasa foliar presenta una tendencia creciente con la radiación PAR hasta aproximadamente 1500–1600 µmol/m²/s, donde comienza a estabilizarse. Este comportamiento sugiere una posible saturación lumínica, aunque se observa una dispersión considerable de los datos.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+# Relación entre biomasa foliar y DPV
+ggplot(datos_plantas, aes(x = deficit_presion_vapor, y = biomasa_hoja_g)) +
+  geom_point(color = "steelblue4", alpha = 0.4) +
+  geom_smooth(method = "loess", color = "navy", fill = "skyblue",
+              se = TRUE) +
+  labs(
+    x = "Déficit de presión de vapor (kPa)",
+    y = "Biomasa foliar (g)",
+    title = "Relación entre DPV y biomasa foliar"
+  ) +
+  theme_bw()
+```
+
+La biomasa foliar presenta una relación no lineal con el DPV, alcanzando valores máximos alrededor de 1.3–1.5 kPa y disminuyendo progresivamente a medida que aumenta el déficit de presión de vapor. Este patrón sugiere una posible reducción del crecimiento foliar bajo condiciones de mayor estrés hídrico.
+
+**Hipótesis**
+
+**Radiación PAR y biomasa foliar**
+
+**$H_0$:** La relación entre la radiación PAR y la biomasa foliar es lineal, sin evidencia de un componente no lineal.
+
+**$H_1$:** La relación entre la radiación PAR y la biomasa foliar es no lineal, posiblemente asociada con un proceso de saturación lumínica
+
+**Déficit de presión de vapor (DPV) y biomasa foliar**
+
+**$H_0$:** La relación entre el DPV y la biomasa foliar es lineal, sin evidencia de un componente no lineal.
+
+**$H_1$:** La relación entre el DPV y la biomasa foliar es no lineal, posiblemente asociada con cambios en la respuesta fisiológica al estrés hídrico.
+
+Nivel de significancia: $\alpha = 0.05$.
+
+**Selección del modelo**
+
+Se propone un modelo aditivo generalizado (GAM) con distribución Gamma y función de enlace log, dado que la biomasa foliar es una variable continua y estrictamente positiva. Aunque un GLM Gamma permitiría modelar esta respuesta, asumiría una relación lineal entre los predictores y el logaritmo de la biomasa esperada. En cambio, los gráficos exploratorios sugieren posibles relaciones no lineales, asociadas con saturación lumínica y estrés hídrico.
+
+```{r, warning=FALSE, message=FALSE}
+library(mgcv)
+
+# GAM con distribución Gamma y enlace log
+mod_gam = gam(
+  biomasa_hoja_g ~ s(radiacion_par) + s(deficit_presion_vapor),
+  family = Gamma(link = "log"),
+  data = datos_plantas, method = "REML"
+)
+
+# GLM Gamma con efectos lineales
+mod_glm = glm(
+  biomasa_hoja_g ~ radiacion_par + deficit_presion_vapor,
+  family = Gamma(link = "log"), data = datos_plantas
+)
+
+summary(mod_gam)
+summary(mod_glm)
+```
+
+```{r, warning=FALSE, message=FALSE}
+# Comparación del ajuste entre GLM y GAM
+AIC(mod_glm, mod_gam)
+```
+
+El GLM Gamma mostró que tanto la radiación PAR ($\beta = 0.00045$; $p < 0.001$) como el DPV ($\beta = -0.549$; $p < 0.001$) se relacionan significativamente con la biomasa foliar. Sin embargo, al comparar los modelos, el GAM presentó un AIC mucho menor (1333.09 frente a 1511.47), lo que indica que representa mejor los datos. Además, los valores de edf superiores a 1 para la radiación (4.21) y el DPV (4.61) sugieren que sus relaciones con la biomasa no son simplemente lineales. El GAM explicó el 82.9 % de la devianza, por lo que los resultados respaldan las hipótesis alternativas y sugieren que la respuesta de la biomasa a las condiciones ambientales es más compleja que un aumento o disminución constante.
+
+```{r, warning=FALSE, message=FALSE}
+# Diagnóstico GAM
+set.seed(123)
+gam.check(mod_gam)
+```
+
+Los diagnósticos del GAM mostraron una convergencia adecuada y un comportamiento general aceptable de los residuos. La prueba de dimensión de las funciones suaves no evidenció problemas para la radiación PAR (p = 0.350), mientras que para el DPV se encontró una posible limitación (p = 0.025). Sin embargo, sus grados de libertad efectivos (edf = 4.61) se encuentran por debajo del máximo permitido (k' = 9), por lo que este resultado debe interpretarse con cautela.
+
+```{r}
+concurvity(mod_gam, full = TRUE)
+```
+
+La evaluación de concurvidad mostró valores bajos para ambas funciones suaves, con valores máximos de 0.129. Esto indica que no existe una dependencia importante entre los efectos estimados de la radiación PAR y el DPV.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+# Visualizar los s() del GAM
+par(mfrow = c(1, 2))
+
+plot(mod_gam,
+     select = 1,
+     shade = TRUE,
+     shade.col = "lightblue",
+     col = "navy",
+     lwd = 2,
+     xlab = "Radiación PAR (µmol/m²/s)",
+     ylab = "Efecto parcial sobre log(biomasa)",
+     main = "Efecto de la radiación PAR",
+     rug = TRUE)
+
+plot(mod_gam,
+     select = 2,
+     shade = TRUE,
+     shade.col = "lightblue",
+     col = "navy",
+     lwd = 2,
+     xlab = "Déficit de presión de vapor (kPa)",
+     ylab = "Efecto parcial sobre log(biomasa)",
+     main = "Efecto del DPV",
+     rug = TRUE)
+
+par(mfrow = c(1, 1))
+```
+
+En conjunto, los resultados muestran que la acumulación de biomasa foliar está relacionada tanto con la disponibilidad de luz como con el estrés hídrico. La respuesta a la radiación PAR comienza a desacelerarse alrededor de 800 µmol/m²/s y tiende a estabilizarse a valores más altos, lo que sugiere que recibir más luz no siempre se traduce en una mayor biomasa. Por otro lado, la respuesta más favorable al DPV se observa cerca de 1.3 kPa, mientras que a partir de aproximadamente 2 kPa la biomasa disminuye de forma más pronunciada. Esto sugiere que la especie puede aprovechar un rango amplio de radiación, pero que el aumento del estrés hídrico limita su capacidad de acumular biomasa foliar.
+
+## Ejercicio 2
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+# Daño foliar según temperatura ambiental
+ggplot(datos_plantas,
+       aes(x = temperatura_media, y = presencia_dano_foliar)) +
+  geom_jitter(width = 0, height = 0.05,
+              color = "steelblue4", alpha = 0.3) +
+  geom_smooth(method = "loess", color = "navy",
+              fill = "skyblue", se = TRUE) +
+  labs(
+    title = "Daño foliar según la temperatura",
+    x = "Temperatura media (°C)",
+    y = "Presencia de daño foliar (0 = No, 1 = Sí)"
+  ) +
+  theme_bw()
+```
+
+La presencia de daño foliar muestra una tendencia no lineal con la temperatura. La proporción estimada de hojas con daño es relativamente baja a temperaturas entre 10 y 18 °C, aumenta progresivamente hasta alcanzar sus valores más altos alrededor de 25 °C y vuelve a disminuir a temperaturas superiores. Esto sugiere que el daño por herbivoría podría ser más frecuente en condiciones térmicas intermedias-altas.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+# Daño foliar según humedad del suelo
+ggplot(datos_plantas,
+       aes(x = humedad_suelo, y = presencia_dano_foliar)) +
+  geom_jitter(width = 0, height = 0.05,
+              color = "steelblue4", alpha = 0.3) +
+  geom_smooth(method = "loess", color = "navy",
+              fill = "skyblue", se = TRUE) +
+  labs(
+    title = "Daño foliar según la humedad del suelo",
+    x = "Humedad del suelo (%)",
+    y = "Presencia de daño foliar (0 = No, 1 = Sí)"
+  ) +
+  theme_bw()
+```
+
+La presencia de daño foliar tiende a disminuir a medida que aumenta la humedad del suelo, pasando de valores más altos en condiciones secas a un mínimo cercano al 60–65 % de humedad. A partir de ese punto se observa un ligero aumento, aunque con mayor incertidumbre. Esto sugiere que el daño por herbivoría podría ser más frecuente en suelos secos, mientras que las condiciones de humedad intermedia-alta parecen asociarse con una menor probabilidad de daño.
+
+**Hipótesis**
+
+**Temperatura ambiental y presencia de daño foliar**
+
+**$H_0$:** La relación entre la temperatura ambiental y la probabilidad de presencia de daño foliar es lineal en la escala logit.
+
+**$H_1$:** La relación entre la temperatura y la probabilidad de daño foliar es no lineal en la escala logit.
+
+**Humedad del suelo y presencia de daño foliar**
+
+**$H_0$:** La relación entre la humedad del suelo y la probabilidad de daño foliar es lineal en la escala logit.
+
+**$H_1$:** La relación entre la humedad del suelo y la probabilidad de daño foliar es no lineal en la escala logit.
+
+Nivel de significancia: $\alpha = 0.05$.
+
+**Selección del modelo**
+
+Se propone un modelo aditivo generalizado (GAM) con distribución binomial y enlace logit, ya que la presencia de daño foliar es una variable binaria (0 = ausencia, 1 = presencia). Aunque un GLM binomial permitiría analizar la probabilidad de daño, asumiría relaciones lineales entre los predictores y el logit de dicha probabilidad. Como los gráficos exploratorios sugieren respuestas no lineales frente a la temperatura y la humedad del suelo, el GAM permite incorporar funciones suaves para evaluar estos patrones sin imponer una forma específica a las relaciones.
+
+```{r, warning=FALSE, message=FALSE}
+# GAM binomial con enlace logit
+mod_gam_logit = gam(
+  presencia_dano_foliar ~ s(temperatura_media) + s(humedad_suelo),
+  family = binomial(link = "logit"), data = datos_plantas,
+  method = "REML"
+)
+
+# GLM binomial con efectos lineales
+mod_glm_bin = glm(
+  presencia_dano_foliar ~ temperatura_media + humedad_suelo,
+  family = binomial(link = "logit"), data = datos_plantas
+)
+
+summary(mod_gam_logit)
+summary(mod_glm_bin)
+```
+
+```{r, warning=FALSE, message=FALSE}
+# Comparación del ajuste entre GLM y GAM
+AIC(mod_glm_bin, mod_gam_logit)
+```
+
+Ambos modelos encontraron una asociación significativa entre las condiciones microclimáticas y la presencia de daño foliar. Sin embargo, el GAM mostró relaciones no lineales para la temperatura (edf = 2.516; p = 0.008) y la humedad del suelo (edf = 1.543; p < 0.001), siendo la curvatura más marcada en la respuesta a la temperatura. Además, presentó un AIC ligeramente menor que el GLM (312.02 frente a 315.41), por lo que se prefirió el GAM, aunque la mejora en el ajuste fue moderada. El modelo explicó el 9.92 % de la devianza, lo que sugiere que la temperatura y la humedad influyen en la probabilidad de daño foliar, pero no explican por completo su ocurrencia.
+
+```{r}
+# Diagnóstico GAM
+set.seed(123)
+gam.check(mod_gam_logit)
+
+concurvity(mod_gam_logit, full = TRUE)
+```
+
+Los diagnósticos del GAM mostraron una convergencia adecuada y no evidenciaron problemas en la dimensión de las funciones suaves, con valores de k-index cercanos o superiores a 1. Además, la concurvidad fue baja, lo que sugiere que los efectos de la temperatura y la humedad del suelo pueden estimarse sin problemas importantes de dependencia entre ellos. Aunque los residuos presentan una distribución irregular, esto es esperable al trabajar con una respuesta binaria.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+# Visualizar los s() del GAM
+par(mfrow = c(1, 2))
+
+plot(mod_gam_logit,
+     select = 1,
+     shade = TRUE,
+     shade.col = "lightblue",
+     col = "navy",
+     lwd = 2,
+     xlab = "Temperatura media (°C)",
+     ylab = "Efecto parcial sobre el logit",
+     main = "Efecto de la temperatura",
+     rug = TRUE)
+
+plot(mod_gam_logit,
+     select = 2,
+     shade = TRUE,
+     shade.col = "lightblue",
+     col = "navy",
+     lwd = 2,
+     xlab = "Humedad del suelo (%)",
+     ylab = "Efecto parcial sobre el logit",
+     main = "Efecto de la humedad del suelo",
+     rug = TRUE)
+
+par(mfrow = c(1, 1))
+```
+
+Las curvas del GAM muestran que la temperatura y la humedad del suelo se relacionan de manera diferente con la presencia de daño foliar. En el caso de la temperatura, el efecto aumenta hasta alcanzar su máximo alrededor de 24–25 °C y después comienza a disminuir, lo que sugiere una mayor vulnerabilidad a la herbivoría en ese rango térmico. Por otro lado, el efecto de la humedad del suelo disminuye progresivamente a medida que aumenta la disponibilidad de agua, siendo más alto en condiciones secas, especialmente entre el 10 y el 30 % de humedad. En conjunto, los resultados sugieren que el riesgo de daño foliar es mayor en ambientes relativamente cálidos y con baja humedad del suelo.

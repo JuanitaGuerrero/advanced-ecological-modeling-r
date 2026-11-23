@@ -1,0 +1,378 @@
+---
+title: ""
+author: ""
+date: ""
+
+output:
+  pdf_document:
+    toc: false
+    number_sections: false
+    latex_engine: xelatex
+
+header-includes:
+  - \usepackage{geometry}
+  - \geometry{margin=2.5cm}
+---
+
+\begin{center}
+
+\vspace{1cm}
+
+{\Huge \textbf{Taller 6}}
+
+\vspace{0.3cm}
+
+{\Large Biología Cuantitativa}
+
+\vspace{1cm}
+
+\end{center}
+
+\noindent
+\textbf{Grupo 6:} Juanita Guerrero \& María José Camacho
+\hfill
+`r {
+  meses <- c('enero','febrero','marzo','abril','mayo','junio',
+             'julio','agosto','septiembre','octubre','noviembre','diciembre')
+  hoy <- Sys.Date()
+  paste(as.numeric(format(hoy, '%d')),
+        'de',
+        meses[as.numeric(format(hoy, '%m'))],
+        'de',
+        format(hoy, '%Y'))
+}`
+
+\vspace{-1.5em}
+\noindent\rule{\textwidth}{0.4pt}
+\vspace{-0.3em}
+
+\begingroup
+\renewcommand{\contentsname}{}
+\tableofcontents
+\endgroup
+
+\newpage
+
+# Sección 1 - Expedición al Valle del Magdalena: Modelación No Lineal y Estructuras Jerárquicas
+
+En este taller se analizarán datos ecológicos recolectados en la cuenca media del río Magdalena, con el fin de estudiar las relaciones entre las condiciones ambientales y las respuestas de la vegetación. Para ello, se utilizarán Modelos Aditivos Generalizados (GAM) y Modelos Lineales de Efectos Mixtos (LMM).
+
+# Sección 2 - Modelos Aditivos Generalizados (GAMs)
+
+## Ejercicio 1
+
+```{r, warning=FALSE, message=FALSE}
+# Importar datos
+gams = read.csv("../data/magdalena_gams.csv")
+
+# Valores faltantes
+colSums(is.na(gams))
+
+summary(gams)
+```
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+library(ggplot2)
+
+# Biomasa foliar y T anual
+ggplot(gams, aes(x = temp_annual, y = tree_biomass_g)) +
+  geom_point(alpha = 0.5, color = "darkgreen") +
+  geom_smooth(method = "loess", color = "black", se = TRUE) +
+  labs(
+    title = "Relación entre temperatura anual y biomasa foliar",
+    x = "Temperatura media anual (°C)",
+    y = "Biomasa foliar seca (g)"
+  ) +
+  theme_bw()
+```
+
+Se observa una relación positiva y no lineal: la biomasa aumenta con la temperatura, especialmente en valores intermedios y altos. Esto podría relacionarse con condiciones térmicas más favorables para el crecimiento vegetal.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+# Biomasa foliar y altitud
+ggplot(gams, aes(x = altitude, y = tree_biomass_g)) +
+  geom_point(alpha = 0.5, color = "darkgreen") +
+  geom_smooth(method = "loess", color = "black", se = TRUE) +
+  labs(
+    title = "Relación entre altitud y biomasa foliar",
+    x = "Altitud (m s. n. m.)",
+    y = "Biomasa foliar seca (g)"
+  ) +
+  theme_bw()
+```
+
+La biomasa disminuye de forma no lineal a medida que aumenta la altitud. Esto podría asociarse con temperaturas más bajas y condiciones ambientales que limitan el crecimiento vegetal en zonas elevadas.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+# Cobertura de musgo y radiación
+ggplot(gams, aes(x = par_light, y = moss_coverage)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_smooth(method = "loess", color = "black", se = TRUE) +
+  labs(
+    title = "Relación entre radiación y cobertura de musgo",
+    x = "Radiación fotosintéticamente activa (PAR)",
+    y = "Proporción de cobertura de musgo"
+  ) +
+  theme_bw()
+```
+
+Se observa una relación en forma de U invertida, con mayor cobertura a niveles intermedios de radiación. Esto podría indicar un equilibrio entre la disponibilidad de luz y el riesgo de desecación por exposición elevada.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+# Cobertura de musgo y humedad
+ggplot(gams, aes(x = humidity, y = moss_coverage)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_smooth(method = "loess", color = "black", se = TRUE) +
+  labs(
+    title = "Relación entre humedad y cobertura de musgo",
+    x = "Humedad relativa (%)",
+    y = "Proporción de cobertura de musgo"
+  ) +
+  theme_bw()
+```
+
+La cobertura tiende a aumentar con la humedad relativa, aunque presenta bastante dispersión. Esto es coherente con la dependencia de los musgos de la disponibilidad de agua para mantener su actividad fisiológica.
+
+Una aproximación mediante modelos lineales simples (GLM) sería insuficiente para capturar estos procesos ecológicos, ya que evidenciamos que las relaciones entre las variables respuesta y las variables ambientales no son lineales ni monótonas, sino que cambian de dirección, como vimos muy claramente en la relación entre cobertura de briófitos y radiación. Los Modelos Aditivos Generalizados (GAM), nos permiten suavizar esas lineas de relación entre los datos para poder representarlos de manera más exacta.
+
+## Ejercicio 2
+
+Se escoge la familia de distribución Gamma porque la variable biomasa foliar seca solo tiene valores positivos, y 
+Gamma es apropiada para variables cuyos datos son continuos sesgados a la derecha. Además, se incluyen funciones de suavizado `s()` para representar posibles relaciones no lineales con la temperatura y la altitud.
+
+```{r, warning=FALSE, message=FALSE}
+library(mgcv)
+
+# GAM
+modelo_gam = gam(
+  tree_biomass_g ~ s(temp_annual) + s(altitude), data = gams, family = Gamma(link = "log"),
+  method = "ML"
+)
+
+# GLM
+modelo_glm = glm(
+  tree_biomass_g ~ temp_annual + altitude,
+  data = gams,
+  family = Gamma(link = "log")
+)
+
+summary(modelo_gam)
+summary(modelo_glm)
+```
+
+En ambos modelos, la temperatura y la altitud se relacionan significativamente con la biomasa foliar (p < 0.001). El GLM muestra un efecto positivo de la temperatura y negativo de la altitud. En el GAM, la temperatura presenta una relación prácticamente lineal (edf = 1.002), mientras que la altitud muestra una relación no lineal (edf = 4.396). El GAM explica el 79.3 % de la devianza.
+
+```{r, warning=FALSE, message=FALSE}
+# Comparación AIC
+AIC(modelo_gam, modelo_glm)
+```
+
+El GAM presenta un AIC menor que el GLM (1979.16 frente a 2068.87), por lo que ofrece un mejor equilibrio entre ajuste y complejidad. Esto sugiere que incorporar relaciones no lineales, especialmente para la altitud, mejora la representación de la biomasa foliar.
+
+```{r, warning=FALSE, message=FALSE}
+# Diagnóstico GAM
+gam.check(modelo_gam)
+```
+
+Los residuos muestran un comportamiento adecuado y no se observan problemas importantes en los gráficos. Además, los valores del k-index son cercanos a 1 y sus p-valores son mayores que 0.05, lo que indica que no hay evidencia de problemas con los suavizados.
+
+```{r, warning=FALSE, message=FALSE}
+concurvity(modelo_gam)
+```
+
+Se observa cierta concurvidad entre la temperatura y la altitud, con valores que alcanzan 0.81. Esto puede dificultar la separación de sus efectos individuales sobre la biomasa, aunque no implica necesariamente un problema grave para el ajuste del modelo.
+
+**Conclusión: La biomasa foliar se relaciona positivamente con la temperatura y presenta una respuesta no lineal frente a la altitud. Esto sugiere que las condiciones ambientales influyen en la producción de biomasa y que su efecto no siempre puede representarse mediante relaciones lineales.**
+
+## Ejercicio 3
+
+Se utiliza una distribución Beta con enlace logit porque la cobertura de musgo es una proporción continua entre 0 y 1, y este enlace permite mantener las predicciones dentro de ese rango. Además, se incluyen funciones de suavizado `s()` para representar posibles relaciones no lineales con la radiación y la humedad.
+
+```{r, warning=FALSE, message=FALSE}
+# GAM
+gam_musgo = gam(
+  moss_coverage ~ s(par_light) + s(humidity), data = gams, 
+  family = betar(link = "logit"),
+  method = "ML"
+)
+
+summary(gam_musgo)
+```
+
+La radiación y la humedad se relacionan significativamente con la cobertura de musgo (p < 0.001). Ambas presentan relaciones no lineales, especialmente la radiación (edf = 5.192), mientras que la humedad muestra una curvatura más suave (edf = 1.851). El modelo explica el 66.8 % de la devianza.
+
+```{r, warning=FALSE, message=FALSE}
+# Diagnóstico GAM
+gam.check(gam_musgo)
+```
+
+Los residuos muestran un comportamiento razonable, sin patrones problemáticos evidentes, y el modelo converge adecuadamente. Además, los valores del k-index son cercanos a 1 (0.99 y 0.98), con p-valores mayores que 0.05, por lo que no hay evidencia de que la dimensión de los splines sea insuficiente.
+
+```{r, warning=FALSE, message=FALSE}
+concurvity(gam_musgo)
+```
+
+Los valores de concurvidad son bajos (máximo de 0.10), por lo que no se observan problemas importantes de concurvidad entre la radiación y la humedad.
+
+```{r, warning=FALSE, message=FALSE}
+plot(gam_musgo, pages = 1, shade = TRUE)
+```
+
+La cobertura de musgo parece ser mayor cuando la radiación es intermedia. Esto tiene sentido porque, aunque los musgos necesitan luz para realizar la fotosíntesis, una exposición demasiado alta puede hacer que pierdan agua y afectar su actividad fotosintética. En cuanto a la humedad, se observa que su efecto aumenta a medida que esta es mayor, aunque el incremento se vuelve menos marcado en los valores más altos. Esto podría deberse a que los musgos necesitan agua para mantenerse activos y realizar sus procesos fisiológicos.
+
+# Sección 3 - Modelos Lineales de Efectos Mixtos (LMMs)
+
+## Ejercicio 4
+
+```{r, warning=FALSE, message=FALSE}
+# Importar datos
+lmm = read.csv("../data/magdalena_lmm.csv")
+```
+
+```{r, warning=FALSE, message=FALSE}
+# V categóricas en factores
+lmm$region = as.factor(lmm$region)
+lmm$forest = as.factor(lmm$forest)
+lmm$tree = as.factor(lmm$tree)
+lmm$treatment = as.factor(lmm$treatment)
+
+# Ordenar bosques numéricamente
+lmm$forest = factor(
+  lmm$forest,
+  levels = paste0("Forest_", 1:18)
+)
+```
+
+```{r, warning=FALSE, message=FALSE}
+# Región 1
+ggplot(subset(lmm, region == "Region_1"),
+       aes(x = forest, y = photosynthesis, color = treatment)) +
+  stat_summary(fun = mean, geom = "point",
+               position = position_dodge(width = 0.4), size = 3) +
+  scale_color_manual(values = c(
+    "Control" = "#A9D6E5",
+    "Enriched" = "#2C7DA0"
+  )) +
+  labs(
+    title = "Fotosíntesis promedio - Región 1",
+    x = "Bosque",
+    y = "Fotosíntesis promedio",
+    color = "Tratamiento"
+  ) +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+```{r, warning=FALSE, message=FALSE}
+# Región 2
+ggplot(subset(lmm, region == "Region_2"),
+       aes(x = forest, y = photosynthesis, color = treatment)) +
+  stat_summary(fun = mean, geom = "point",
+               position = position_dodge(width = 0.4), size = 3) +
+  scale_color_manual(values = c(
+    "Control" = "#A9D6E5",
+    "Enriched" = "#2C7DA0"
+  )) +
+  labs(
+    title = "Fotosíntesis promedio - Región 2",
+    x = "Bosque",
+    y = "Fotosíntesis promedio",
+    color = "Tratamiento"
+  ) +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+```{r, warning=FALSE, message=FALSE}
+# Región 3
+ggplot(subset(lmm, region == "Region_3"),
+       aes(x = forest, y = photosynthesis, color = treatment)) +
+  stat_summary(fun = mean, geom = "point",
+               position = position_dodge(width = 0.4), size = 3) +
+  scale_color_manual(values = c(
+    "Control" = "#A9D6E5",
+    "Enriched" = "#2C7DA0"
+  )) +
+  labs(
+    title = "Fotosíntesis promedio - Región 3",
+    x = "Bosque",
+    y = "Fotosíntesis promedio",
+    color = "Tratamiento"
+  ) +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+En las tres regiones se observa que los árboles con tratamiento `Enriched` presentan una fotosíntesis promedio mayor que los del grupo `Control`. Sin embargo, los valores cambian entre bosques, lo que sugiere que las condiciones de cada lugar también podrían influir en la respuesta. Desde el punto de vista biológico, esto podría indicar que el enriquecimiento favorece la actividad fotosintética, aunque sería necesario evaluar estadísticamente estas diferencias para confirmar el efecto del tratamiento.
+
+## Ejercicio 5
+
+```{r, warning=FALSE, message=FALSE}
+library(lme4)
+
+# LMM con árboles anidados en bosques
+modelo_lmm = lmer(
+  photosynthesis ~ treatment + elevation + region +
+    (1 | forest/tree),
+  data = lmm
+)
+
+summary(modelo_lmm)
+```
+
+El modelo muestra que el tratamiento `Enriched` se asocia con un aumento promedio de 4.23 unidades en la fotosíntesis frente al `Control`, teniendo en cuenta la elevación y la región. Por otro lado, la elevación presenta una relación negativa con la fotosíntesis, con una disminución estimada de 0.00286 unidades por cada metro adicional. Las diferencias estimadas entre regiones son pequeñas en comparación con el efecto del tratamiento. Además, los componentes aleatorios muestran que existe variabilidad tanto entre bosques como entre árboles de un mismo bosque.
+
+```{r, warning=FALSE, message=FALSE, fig.width=12, fig.height=10, out.width="100%"}
+library(performance)
+library(see)
+
+# Supuestos
+print(check_model(modelo_lmm))
+```
+
+Los diagnósticos muestran que los residuos se aproximan a una distribución normal y presentan una dispersión relativamente constante, aunque se observan algunas desviaciones leves. Los efectos aleatorios de bosques y árboles también siguen aproximadamente las distribuciones esperadas. Además, no se identifican problemas importantes de colinealidad ni patrones muy marcados en los residuos.
+
+```{r, warning=FALSE, message=FALSE}
+# Componentes de varianza
+varianzas = as.data.frame(VarCorr(modelo_lmm))
+varianzas
+
+# ICC
+varianza_total = sum(varianzas$vcov)
+
+icc_bos = varianzas$vcov[2] / varianza_total
+icc_arb = varianzas$vcov[1] / varianza_total
+
+icc_bos
+icc_arb
+```
+
+El 54.1 % de la variabilidad restante de la fotosíntesis corresponde a diferencias entre bosques y el 31.9 % a diferencias entre árboles dentro de los bosques. Además, dos mediciones de un mismo árbol tienen una correlación estimada del 86.0 %, ya que comparten tanto el efecto del árbol como el del bosque. Estos resultados muestran que las observaciones no son completamente independientes y respaldan el uso de un modelo mixto.
+
+**Conclusión: los resultados sugieren que la respuesta fotosintética de los árboles no depende únicamente del tratamiento, sino también del entorno en el que crecen. Las diferencias entre bosques y entre árboles podrían estar relacionadas con condiciones ambientales locales o características propias de cada individuo.**
+
+## Ejercicio 6
+
+```{r, warning=FALSE, message=FALSE}
+# LMM con pendiente aleatoria del tratamiento por bosque
+modelo_lmm_pendiente = lmer(
+  photosynthesis ~ treatment + elevation + region +
+    (1 + treatment | forest) +
+    (1 | forest:tree),
+  data = lmm
+)
+
+summary(modelo_lmm_pendiente)
+```
+
+Al comparar ambos modelos, se observa que las varianzas entre bosques y entre árboles prácticamente no cambian. Además, la varianza de la pendiente aleatoria del tratamiento es muy cercana a cero (0.00033), lo que sugiere que el efecto del tratamiento es bastante similar entre bosques. Como el modelo con pendiente aleatoria también presenta un ajuste singular, se considera más adecuado mantener el modelo del ejercicio 5, que tiene una estructura más sencilla sin perder información importante sobre la variabilidad de los datos.
+
+```{r, warning=FALSE, message=FALSE, fig.width=12, fig.height=10, out.width="100%"}
+# Supuestos
+print(check_model(modelo_lmm_pendiente))
+```
+
+Los diagnósticos del modelo con pendiente aleatoria muestran que los residuos siguen aproximadamente una distribución normal y presentan una dispersión relativamente constante, aunque se observan pequeñas desviaciones. Los efectos aleatorios de bosques y árboles también se aproximan a la normalidad. En general, no se identifican problemas graves en los supuestos evaluados. Sin embargo, el modelo presenta un ajuste singular y una varianza prácticamente nula para la pendiente aleatoria del tratamiento, por lo que se mantiene la preferencia por el modelo más sencillo del ejercicio 5.
+
+**Los resultados sugieren que el enriquecimiento favorece la fotosíntesis, posiblemente porque los árboles pueden aprovechar mejor los recursos disponibles. En cambio, a mayor elevación, las condiciones ambientales podrían limitar su actividad fotosintética. Además, las diferencias entre bosques y árboles muestran que la respuesta de las plantas también depende de su entorno y de las características de cada individuo.**
+
